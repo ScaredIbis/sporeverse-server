@@ -14,9 +14,11 @@ import { ERC20__factory } from './abi/types/factories/ERC20__factory';
 
 const ARB_TCR_ADDRESS = '0xa72159fc390f0e3c6d415e658264c7c4051e9b87';
 const MAINNET_TCR_ADDRESS = '0x9c4a4204b79dd291d6b6571c5be8bbcd0622f050';
+const TOKEMAK_TCR_ADDRESS = '0x15A629f0665A3Eb97D7aE9A7ce7ABF73AeB79415';
 
 const arbTCR = ERC20__factory.connect(ARB_TCR_ADDRESS, ethers.getDefaultProvider(process.env.ARBITRUM_RPC_URL));
 const mainnetTCR = ERC20__factory.connect(MAINNET_TCR_ADDRESS, ethers.getDefaultProvider(process.env.MAINNET_RPC_URL));
+const tokemakTCR = ERC20__factory.connect(TOKEMAK_TCR_ADDRESS, ethers.getDefaultProvider(process.env.MAINNET_RPC_URL));
 
 type Player = {
   x: number,
@@ -40,16 +42,18 @@ const hasTCR = async (address: string): Promise<boolean> => {
   try {
     const [
       arbBalance,
-      mainnetBalance
+      mainnetBalance,
+      tokemakBalance
     ] = await Promise.all([
       arbTCR.balanceOf(address),
-      mainnetTCR.balanceOf(address)
+      mainnetTCR.balanceOf(address),
+      tokemakTCR.balanceOf(address)
     ]);
 
     console.log('ARB BALANCE', arbBalance.toString());
     console.log('MAINNET BALANCE', mainnetBalance.toString());
 
-    return !arbBalance.eq(0) || !mainnetBalance.eq(0);
+    return !arbBalance.eq(0) || !mainnetBalance.eq(0) || !tokemakBalance.eq(0);
   } catch (error) {
     return false;
   }
