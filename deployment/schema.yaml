@@ -1,0 +1,11 @@
+#@data/values
+---
+imageVersion: gcr.io/tracer-protocol-testing/api:0.0.2
+staticIpName: perpetual-api-ip
+certName: perpetual-api-cert
+certDomain: api.tracer.finance
+name: perpetual-api
+ingressName: perpetual-api-ingress
+serviceName: perpetual-api-service
+envName: perpetual-api-env
+secretsName: perpetual-api-secrets
