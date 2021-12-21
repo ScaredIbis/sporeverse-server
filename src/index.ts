@@ -61,7 +61,7 @@ const hasTCR = async (address: string): Promise<boolean> => {
 
 const rooms: Record<string, Room> = {
   public: {
-    background: 'https://i.ibb.co/VN9V9gq/sporeverse-public.png',
+    background: 'https://i.ibb.co/HFj2bKP/Screen-Shot-2021-12-21-at-10-30-43-am-cropped.png',
     name: 'Spore Vilage',
     players: {}
   },
