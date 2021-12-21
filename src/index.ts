@@ -1,3 +1,7 @@
+/* eslint-disable */ // allow dotenv to be used ASAP
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { ethers } from 'ethers';
@@ -5,6 +9,14 @@ import express from 'express';
 import crypto from 'crypto';
 import cors from 'cors';
 import { json as jsonBodyParser } from 'body-parser';
+import { ERC20__factory } from './abi/types/factories/ERC20__factory';
+/* eslint-enable */
+
+const ARB_TCR_ADDRESS = '0xa72159fc390f0e3c6d415e658264c7c4051e9b87';
+const MAINNET_TCR_ADDRESS = '0x9c4a4204b79dd291d6b6571c5be8bbcd0622f050';
+
+const arbTCR = ERC20__factory.connect(ARB_TCR_ADDRESS, ethers.getDefaultProvider(process.env.ARBITRUM_RPC_URL));
+const mainnetTCR = ERC20__factory.connect(MAINNET_TCR_ADDRESS, ethers.getDefaultProvider(process.env.MAINNET_RPC_URL));
 
 type Player = {
   x: number,
@@ -15,26 +27,51 @@ type Player = {
   messages: []
 }
 
-const validRoomNames = {
-  public: true,
-  vip: true
-};
+type Room = {
+  background: string,
+  name: string,
+  check?: (key: string) => Promise<Boolean>,
+  players: Record<string, Player>
+}
 
-type ValidRoomName = keyof typeof validRoomNames
+const knownPlayerData: Record<string, { label?: string, avatar?: string }> = {};
 
-const rooms: Record<string, { check?: (key: string) => Promise<Boolean>, players: Record<string, Player> }> = {
-  public: {
-    players: {}
-  },
-  vip: {
-    players: {}
+const hasTCR = async (address: string): Promise<boolean> => {
+  try {
+    const [
+      arbBalance,
+      mainnetBalance
+    ] = await Promise.all([
+      arbTCR.balanceOf(address),
+      mainnetTCR.balanceOf(address)
+    ]);
+
+    console.log('ARB BALANCE', arbBalance.toString());
+    console.log('MAINNET BALANCE', mainnetBalance.toString());
+
+    return !arbBalance.eq(0) || !mainnetBalance.eq(0);
+  } catch (error) {
+    return false;
   }
 };
 
-const players: Record<string, Player> = {};
-
-const isValidRoomName = (roomName: string): roomName is ValidRoomName => {
-  return validRoomNames[roomName as ValidRoomName];
+const rooms: Record<string, Room> = {
+  public: {
+    background: 'https://i.ibb.co/VN9V9gq/sporeverse-public.png',
+    name: 'Spore Vilage',
+    players: {}
+  },
+  vip: {
+    background: 'https://i.ibb.co/Xbt039t/spore-vip.png',
+    name: 'Spore Hall',
+    players: {}
+  },
+  tracer: {
+    background: 'https://i.ibb.co/GQBs6cQ/Screen-Shot-2021-12-21-at-10-23-39-am-removebg-preview-1.png',
+    name: 'The Sniper Den',
+    check: hasTCR,
+    players: {}
+  }
 };
 
 const app = express();
@@ -46,10 +83,8 @@ const nonces: Record<string, string> = {};
 // lookup from keys to addresses, used for persistent sessions
 const keys: Record<string, string> = {};
 
-const knownSocketRooms: Record<string, string> = {};
+const knownPlayerRooms: Record<string, string> = {};
 const knownSocketPlayerAddresses: Record<string, string> = {};
-
-const socketIds: Record<string, Socket> = {};
 
 app.use(cors());
 app.use(jsonBodyParser());
@@ -106,104 +141,111 @@ const io = new Server(server, {
   }
 });
 
-// setInterval(() => {
-//   io.to('public').emit('tick', rooms.public.players);
-//   // io.to('vip').emit('tick', rooms.vip.players);
-// }, 100);
-
 io.on('connection', (socket: Socket) => {
   console.log('GOT A CONNECTION', Date.now(), socket.id);
 
-  socket.on('join', ({ roomName, key }: { roomName: string, key: string }) => {
+  socket.on('join', async ({ roomName, key }: { roomName: string, key: string }) => {
     const playerAddress = keys[key];
-    // const playerAddress = '0xE74864C33Be4d8DA148e0e3a21d345Cbe6EC9677'.toLowerCase();
     knownSocketPlayerAddresses[socket.id] = playerAddress;
 
-    if (knownSocketRooms[socket.id]) {
-      console.log(`${socket.id} is leaving room ${knownSocketRooms[socket.id]}`);
-      socket.leave(knownSocketRooms[socket.id]);
-      delete rooms[roomName].players[playerAddress];
+    if (knownPlayerRooms[playerAddress] === roomName) {
+      // already in this room
+      return;
     }
 
-    if (playerAddress) {
+    if (rooms[roomName].check) {
+      // @ts-ignore
+      const allowed = await rooms[roomName]?.check(playerAddress);
+      if (!allowed) {
+        console.log('USER HAS NO BALANCE');
+        return;
+      }
+    }
+
+    if (knownPlayerRooms[playerAddress]) {
+      console.log(`${playerAddress} is leaving room ${knownPlayerRooms[playerAddress]}`);
+      socket.leave(knownPlayerRooms[playerAddress]);
+      delete rooms[knownPlayerRooms[playerAddress]].players[playerAddress];
+      io.to(knownPlayerRooms[playerAddress]).emit('tick', rooms[knownPlayerRooms[playerAddress]]);
+    }
+
+    if (playerAddress && !rooms[roomName].players[playerAddress]) {
       rooms[roomName].players[playerAddress] = {
-        x: 500,
-        y: 150,
-        label: 'New Spore',
-        avatar: 'https://library.kissclipart.com/20190225/azq/kissclipart-mushroom-clipart-mushroom-6b0c2474587f8dd3.png',
+        x: 600,
+        y: 500,
+        label: '',
+        avatar: 'https://i.ibb.co/ykXzG7c/image.png',
         address: playerAddress,
-        messages: []
+        messages: [],
+        ...knownPlayerData[playerAddress]
       };
 
-      knownSocketRooms[socket.id] = roomName;
-      console.log('SOCKET ID ', socket.id, 'JOINING ROOM ', roomName);
+      knownPlayerRooms[playerAddress] = roomName;
+      console.log('PLAYER ', playerAddress, 'JOINING ROOM ', roomName);
       socket.join(roomName);
-      io.to(roomName).emit('tick', rooms[roomName].players);
+      io.to(roomName).emit('tick', rooms[roomName]);
     }
   });
 
   socket.on('move', ({ x, y }: { x: number, y: number }) => {
     const playerAddress = knownSocketPlayerAddresses[socket.id];
-    const currentRoom = knownSocketRooms[socket.id];
+    const currentRoom = knownPlayerRooms[playerAddress];
 
-    rooms[currentRoom].players[playerAddress].x += x;
-    rooms[currentRoom].players[playerAddress].y += y;
+    if (playerAddress && currentRoom) {
+      rooms[currentRoom].players[playerAddress].x += x;
+      rooms[currentRoom].players[playerAddress].y += y;
 
-    io.to(currentRoom).emit('tick', rooms[currentRoom].players);
+      io.to(currentRoom).emit('tick', rooms[currentRoom]);
+    }
+  });
+
+  socket.on('updateName', (name: string) => {
+    const playerAddress = knownSocketPlayerAddresses[socket.id];
+    const currentRoom = knownPlayerRooms[playerAddress];
+    knownPlayerData[playerAddress] = knownPlayerData[playerAddress] || {};
+    knownPlayerData[playerAddress].label = name;
+
+    if (playerAddress && currentRoom) {
+      rooms[currentRoom].players[playerAddress].label = name;
+
+      io.to(currentRoom).emit('tick', rooms[currentRoom]);
+    }
+  });
+
+  socket.on('updateAvatar', (url: string) => {
+    const playerAddress = knownSocketPlayerAddresses[socket.id];
+    const currentRoom = knownPlayerRooms[playerAddress];
+
+    knownPlayerData[playerAddress] = knownPlayerData[playerAddress] || {};
+    knownPlayerData[playerAddress].avatar = url;
+
+    if (playerAddress && currentRoom) {
+      rooms[currentRoom].players[playerAddress].avatar = url;
+
+      io.to(currentRoom).emit('tick', rooms[currentRoom]);
+    }
+  });
+
+  socket.on('sendMessage', (message: string) => {
+    const playerAddress = knownSocketPlayerAddresses[socket.id];
+    const currentRoom = knownPlayerRooms[playerAddress];
+
+    const playerName = knownPlayerData[playerAddress]?.label;
+    if (playerAddress && currentRoom) {
+      io.to(currentRoom).emit('message', { message, sender: playerName || playerAddress });
+    }
   });
 
   socket.on('disconnect', () => {
     console.log('user disconnected', socket.id);
+    const playerAddress = knownSocketPlayerAddresses[socket.id];
+
+    delete knownPlayerRooms[playerAddress];
+    for (const roomName in rooms) {
+      delete rooms[roomName].players[playerAddress];
+    }
+    delete knownSocketPlayerAddresses[socket.id];
   });
-
-  // socket.on('join', async function ({ roomName, key }: { roomName: string, key: string }) {
-  //   // const playerAddress = keys[key];
-  //   const playerAddress = '0xE74864C33Be4d8DA148e0e3a21d345Cbe6EC9677'.toLowerCase();
-
-  //   if (!playerAddress) {
-  //     return;
-  //   }
-
-  //   if (!isValidRoomName(roomName)) {
-  //     return;
-  //   }
-
-  //   if (rooms[roomName] && rooms[roomName].check) {
-  //     // @ts-ignore
-  //     const isAllowed = rooms[roomName].check ? await rooms[roomName]?.check(key) : true;
-
-  //     if (!isAllowed) {
-  //       return;
-  //     }
-  //   }
-
-  //   // @ts-ignore
-  //   const player = players[playerAddress];
-
-  //   if (!player) {
-  //     players[playerAddress] = {
-  //       x: 150,
-  //       y: 150,
-  //       label: 'New Spore',
-  //       avatar: '',
-  //       currentRoom: roomName,
-  //       address: playerAddress
-  //     };
-  //   } else {
-  //     delete rooms[player.currentRoom].players[playerAddress];
-  //     socket.leave(player.currentRoom);
-  //   }
-
-  //   players[playerAddress].currentRoom = roomName;
-
-  //   rooms[roomName].players[playerAddress] = {
-  //     ...players[playerAddress],
-  //     messages: []
-  //   };
-  //   socket.join(roomName);
-
-  //   io.to(roomName).emit('newPlayer', players[playerAddress]);
-  // });
 });
 
 server.listen(3000);
