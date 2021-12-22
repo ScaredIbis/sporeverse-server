@@ -221,10 +221,10 @@ io.on('connection', (socket: Socket) => {
     const currentRoom = knownPlayerRooms[playerAddress];
 
     knownPlayerData[playerAddress] = knownPlayerData[playerAddress] || {};
-    knownPlayerData[playerAddress].avatar = url;
+    knownPlayerData[playerAddress].avatar = 'https://i.ibb.co/ykXzG7c/image.png';
 
     if (playerAddress && currentRoom) {
-      rooms[currentRoom].players[playerAddress].avatar = url;
+      rooms[currentRoom].players[playerAddress].avatar = 'https://i.ibb.co/ykXzG7c/image.png';
 
       io.to(currentRoom).emit('tick', rooms[currentRoom]);
     }
